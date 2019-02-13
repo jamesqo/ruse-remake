@@ -98,9 +98,10 @@ class MyDatasetReader(DatasetReader):
     #### Notice that the tags are optional, since we'd like to be able to create instances 
     #### from unlabeled data to make predictions on them.
     def text_to_instance(self, mt_tokens: List[Token], ref_tokens: List[Token], human_score: float) -> Instance:
-        mt_sentence_field = TextField(mt_tokens, self.token_indexers)
-        ref_sentence_field = TextField(ref_tokens, self.token_indexers)
-        fields = {"mt_sentence": mt_sentence_field, "ref_sentence": ref_sentence_field, "human_score": human_score}
+        mt_sent_field = TextField(mt_tokens, self.token_indexers)
+        ref_sent_field = TextField(ref_tokens, self.token_indexers)
+        human_score_field = ArrayField(np.array([human_score]))
+        fields = {"mt_sent": mt_sent_field, "ref_sent": ref_sent_field, "human_score": human_score_field}
 
         return Instance(fields)
 
@@ -110,19 +111,24 @@ class MyDatasetReader(DatasetReader):
     def _read(self, file_path: str) -> Iterator[Instance]:
         with open(file_path) as f:
             for line in f:
-                mt_sent, ref_sent, score_str = line.strip().split('\t')
+                mt_sent, ref_sent, score_str = line.strip().split("\t")
                 mt_words, ref_words, human_score = mt_sent.split(), ref_sent.split(), float(score_str)
                 yield self.text_to_instance(map(Token, mt_words), map(Token, ref_words), human_score)
 
 def main():
+    EMBEDDING_DIM = 6
+
     thisdir = path.dirname(path.realpath(__file__))
-    datadir = path.join(thisdir, 'data', 'trg-en')
+    datadir = path.join(thisdir, "data", "trg-en")
     reader = MyDatasetReader()
 
     dataset = reader.read(cached_path(
-        path.join(datadir, 'combined')))
+        path.join(datadir, "combined")))
 
     vocab = Vocabulary.from_instances(dataset)
 
-if __name__ == '__main__':
+    token_embedding = Embedding(num_embeddings=vocab.get_vocab_size("tokens"),
+                                embedding_dim=EMBEDDING_DIM)
+
+if __name__ == "__main__":
     main()
