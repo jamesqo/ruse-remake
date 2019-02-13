@@ -1,3 +1,4 @@
+from os import path
 #### In AllenNLP we use type annotations for just about everything.
 from typing import Iterator, List, Dict
 
@@ -114,11 +115,11 @@ class MyDatasetReader(DatasetReader):
                 yield self.text_to_instance(map(Token, mt_words), map(Token, ref_words), human_score)
 
 def main():
-    thisdir = os.path.dirname(os.path.realpath(__file__))
+    thisdir = path.dirname(path.realpath(__file__))
     reader = MyDatasetReader()
 
     dataset = reader.read(cached_path(
-        os.path.combine(filedir, 'data', 'combined')))
+        path.combine(filedir, 'data', 'combined')))
 
 if __name__ == '__main__':
     main()
