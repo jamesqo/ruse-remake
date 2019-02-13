@@ -122,5 +122,7 @@ def main():
     dataset = reader.read(cached_path(
         path.join(datadir, 'combined')))
 
+    vocab = Vocabulary.from_instances(dataset)
+
 if __name__ == '__main__':
     main()
