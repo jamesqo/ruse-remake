@@ -119,7 +119,7 @@ def main():
     reader = MyDatasetReader()
 
     dataset = reader.read(cached_path(
-        path.join(filedir, 'data', 'combined')))
+        path.join(thisdir, 'data', 'combined')))
 
 if __name__ == '__main__':
     main()
