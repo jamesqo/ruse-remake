@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 #### In AllenNLP we use type annotations for just about everything.
 from typing import Iterator, List, Dict
 
@@ -75,10 +74,9 @@ from allennlp.predictors import SentenceTaggerPredictor
 torch.manual_seed(1)
 
 #### Our first order of business is to implement our <code>DatasetReader</code> subclass.
-class PosDatasetReader(DatasetReader):
+class MyDatasetReader(DatasetReader):
     """
     DatasetReader for PoS tagging data, one sentence per line, like
-
         The###DET dog###NN ate###V the###DET apple###NN
     """
     #### The only parameter our <code>DatasetReader</code> needs is a dict of 
@@ -108,24 +106,19 @@ class PosDatasetReader(DatasetReader):
     #### The other piece we have to implement is <code>_read</code>, 
     #### which takes a filename and produces a stream of <code>Instance</code>s.
     #### Most of the work has already been done in <code>text_to_instance</code>.
-    def _read(self, mt_file_path: str, ref_file_path: str, scores_file_path: str) -> Iterator[Instance]:
-        with open(mt_file_path), open(ref_file_path), open(scores_file_path) as mf, rf, sf:
-            for mt_line, ref_line, score_line in zip(mf, rf, sf):
-                mt_words = mt_line.strip().split()
-                ref_words = ref_line.strip().split()
-                human_score = float(score_line.strip())
-                yield self.text_to_instance([Token(word) for word in mt_words], [Token(word) for word in ref_words], human_score)
-
+    def _read(self, file_path: str) -> Iterator[Instance]:
+        with open(file_path) as f:
+            for line in f:
+                mt_sent, ref_sent, score_str = line.strip().split('\t')
+                mt_words, ref_words, human_score = mt_sent.split(), ref_sent.split(), float(score_str)
+                yield self.text_to_instance(map(Token, mt_words), map(Token, ref_words), human_score)
 
 def main():
-    reader = PosDatasetReader()
+    thisdir = os.path.dirname(os.path.realpath(__file__))
+    reader = MyDatasetReader()
 
-    dataset = reader.read(
-            cached_path('./data/mt-system'),
-            cached_path('./data/reference'),
-            cached_path('./data/human'))
-
-    vocab = Vocabulary.from_instances(dataset)
+    dataset = reader.read(cached_path(
+        os.path.combine(filedir, 'data', 'combined')))
 
 if __name__ == '__main__':
     main()
