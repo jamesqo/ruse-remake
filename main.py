@@ -116,10 +116,11 @@ class MyDatasetReader(DatasetReader):
 
 def main():
     thisdir = path.dirname(path.realpath(__file__))
+    datadir = path.combine(thisdir, 'data', 'trg-en')
     reader = MyDatasetReader()
 
     dataset = reader.read(cached_path(
-        path.join(thisdir, 'data', 'combined')))
+        path.join(datadir, 'combined')))
 
 if __name__ == '__main__':
     main()
