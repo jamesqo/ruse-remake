@@ -12,7 +12,7 @@ import numpy as np
 #### Here each example will have a <code>TextField</code> containing the sentence, 
 #### and a <code>SequenceLabelField</code> containing the corresponding part-of-speech tags.
 from allennlp.data import Instance
-from allennlp.data.fields import TextField, SequenceLabelField
+from allennlp.data.fields import ArrayField, TextField, SequenceLabelField
 
 #### Typically to solve a problem like this using AllenNLP, 
 #### you'll have to implement two classes. The first is a 
