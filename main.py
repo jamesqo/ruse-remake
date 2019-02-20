@@ -61,7 +61,7 @@ from allennlp.modules.seq2seq_encoders import Seq2SeqEncoder, PytorchSeq2SeqWrap
 from allennlp.nn.util import get_text_field_mask, sequence_cross_entropy_with_logits
 
 #### We'll want to track accuracy on the training and validation datasets.
-from allennlp.training.metrics import CategoricalAccuracy
+from allennlp.training.metrics import PearsonCorrelation
 
 #### In our training we'll need a <code>DataIterator</code>s that can intelligently batch our data.
 from allennlp.data.iterators import BucketIterator
@@ -114,6 +114,24 @@ class MyDatasetReader(DatasetReader):
                 mt_sent, ref_sent, score_str = line.strip().split("\t")
                 mt_words, ref_words, human_score = mt_sent.split(), ref_sent.split(), float(score_str)
                 yield self.text_to_instance(map(Token, mt_words), map(Token, ref_words), human_score)
+
+class Ruse(Model):
+    def __init__(self, word_embeddings: TextFieldEmbedder, encoder : Seq2seqEncoder, vocab : Vocabulary) -> None:
+        super().__init__(vocab)
+        self.word_embeddings = word_embeddings
+        self.encoder = encoder
+        self.linear = torch.nn.Linear(in_features=encoder.get_output_dim(), out_features.get_vocab_size('tokens'))
+        self.accuracy = PearsonCorrelation()
+
+    def forward(self, sentence: Dict[str, torch.Tensor], labels: torch.Tensor = None) -> None:
+        mask = get_text_field_mask(sentence)
+        embeddings = self.word_embeddings(sentence)
+        encoder_out = self.encoder(embeddings, mask)
+        tag_logits = self.hidden2tag(encoder_out)
+        output = {"tag_logits": tag_logits}
+
+        return output
+
 
 def main():
     EMBEDDING_DIM = 6
