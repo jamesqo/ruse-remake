@@ -1,102 +1,46 @@
+import os
 from os import path
-#### In AllenNLP we use type annotations for just about everything.
+
 from typing import Iterator, List, Dict
 
-#### AllenNLP is built on top of PyTorch, so we use its code freely.
 import torch
 import torch.optim as optim
 import numpy as np
 
-#### In AllenNLP we represent each training example as an 
-#### <code>Instance</code> containing <code>Field</code>s of various types. 
-#### Here each example will have a <code>TextField</code> containing the sentence, 
-#### and a <code>SequenceLabelField</code> containing the corresponding part-of-speech tags.
 from allennlp.data import Instance
 from allennlp.data.fields import ArrayField, TextField, SequenceLabelField
 
-#### Typically to solve a problem like this using AllenNLP, 
-#### you'll have to implement two classes. The first is a 
-#### <a href ="https://allenai.github.io/allennlp-docs/api/allennlp.data.dataset_readers.html">DatasetReader</a>, 
-#### which contains the logic for reading a file of data and producing a stream of <code>Instance</code>s.
 from allennlp.data.dataset_readers import DatasetReader
 
-#### Frequently we'll want to load datasets or models from URLs. 
-#### The <code>cached_path</code> helper downloads such files, 
-#### caches them locally, and returns the local path. It also 
-#### accepts local file paths (which it just returns as-is).
 from allennlp.common.file_utils import cached_path
 
-#### There are various ways to represent a word as one or more indices. 
-#### For example, you might maintain a vocabulary of unique words and 
-#### give each word a corresponding id. Or you might have one id per 
-#### character in the word and represent each word as a sequence of ids. 
-#### AllenNLP uses a has a <code>TokenIndexer</code> abstraction for this representation.
 from allennlp.data.token_indexers import TokenIndexer, SingleIdTokenIndexer
 from allennlp.data.tokenizers import Token
 
-#### Whereas a <code>TokenIndexer</code> represents a rule for 
-#### how to turn a token into indices, a <code>Vocabulary</code> 
-#### contains the corresponding mappings from strings to integers. 
-#### For example, your token indexer might specify to represent a 
-#### token as a sequence of character ids, in which case the 
-#### <code>Vocabulary</code> would contain the mapping {character -> id}. 
-#### In this particular example we use a <code>SingleIdTokenIndexer</code> 
-#### that assigns each token a unique id, and so the <code>Vocabulary</code> 
-#### will just contain a mapping {token -> id} (as well as the reverse mapping).
 from allennlp.data.vocabulary import Vocabulary
 
-#### Besides <code>DatasetReader</code>, the other class you'll typically 
-#### need to implement is <code>Model</code>, which is a PyTorch <code>Module</code> 
-#### that takes tensor inputs and produces a dict of tensor outputs 
-#### (including the training <code>loss</code> you want to optimize).
 from allennlp.models import Model
 
-#### As mentioned above, our model will consist of an embedding layer,
-#### followed by a LSTM, then by a feedforward layer. AllenNLP includes 
-#### abstractions for all of these that smartly handle padding and batching, 
-#### as well as various utility functions.
 from allennlp.modules.text_field_embedders import TextFieldEmbedder, BasicTextFieldEmbedder
 from allennlp.modules.token_embedders import Embedding
-from allennlp.modules.seq2seq_encoders import Seq2SeqEncoder, PytorchSeq2SeqWrapper
+from allennlp.modules.seq2vec_encoders.pytorch_seq2vec_wrapper import Seq2VecEncoder, PytorchSeq2VecWrapper
 from allennlp.nn.util import get_text_field_mask, sequence_cross_entropy_with_logits
 
-#### We'll want to track accuracy on the training and validation datasets.
-from allennlp.training.metrics import PearsonCorrelation
+from allennlp.training.metrics import Covariance, CategoricalAccuracy, PearsonCorrelation
 
-#### In our training we'll need a <code>DataIterator</code>s that can intelligently batch our data.
 from allennlp.data.iterators import BucketIterator
 
-#### And we'll use AllenNLP's full-featured <code>Trainer</code>.
 from allennlp.training.trainer import Trainer
 
-#### Finally, we'll want to make predictions on new inputs, more about this below.
 from allennlp.predictors import SentenceTaggerPredictor
 
 torch.manual_seed(1)
 
-#### Our first order of business is to implement our <code>DatasetReader</code> subclass.
 class MyDatasetReader(DatasetReader):
-    """
-    DatasetReader for PoS tagging data, one sentence per line, like
-        The###DET dog###NN ate###V the###DET apple###NN
-    """
-    #### The only parameter our <code>DatasetReader</code> needs is a dict of 
-    #### <code>TokenIndexer</code>s that specify how to convert tokens into indices. 
-    #### By default we'll just generate a single index for each token (which we'll call "tokens") 
-    #### that's just a unique id for each distinct token. (This is just the standard 
-    #### "word to index" mapping you'd use in most NLP tasks.)
     def __init__(self, token_indexers: Dict[str, TokenIndexer] = None) -> None:
         super().__init__(lazy=False)
         self.token_indexers = token_indexers or {"tokens": SingleIdTokenIndexer()}
 
-    #### <code>DatasetReader.text_to_instance</code> takes the inputs corresponding
-    #### to a training example (in this case the tokens of the sentence and the
-    #### corresponding part-of-speech tags), instantiates the corresponding
-    #### <a href="https://github.com/allenai/allennlp/blob/master/tutorials/notebooks/data_pipeline.ipynb"><code>Field</code>s</a>
-    #### (in this case a <code>TextField</code> for the sentence and a <code>SequenceLabelField</code> 
-    #### for its tags), and returns the <code>Instance</code> containing those fields.
-    #### Notice that the tags are optional, since we'd like to be able to create instances 
-    #### from unlabeled data to make predictions on them.
     def text_to_instance(self, mt_tokens: List[Token], ref_tokens: List[Token], human_score: float) -> Instance:
         mt_sent_field = TextField(mt_tokens, self.token_indexers)
         ref_sent_field = TextField(ref_tokens, self.token_indexers)
@@ -105,48 +49,91 @@ class MyDatasetReader(DatasetReader):
 
         return Instance(fields)
 
-    #### The other piece we have to implement is <code>_read</code>, 
-    #### which takes a filename and produces a stream of <code>Instance</code>s.
-    #### Most of the work has already been done in <code>text_to_instance</code>.
     def _read(self, file_path: str) -> Iterator[Instance]:
         with open(file_path) as f:
             for line in f:
                 mt_sent, ref_sent, score_str = line.strip().split("\t")
                 mt_words, ref_words, human_score = mt_sent.split(), ref_sent.split(), float(score_str)
-                yield self.text_to_instance(map(Token, mt_words), map(Token, ref_words), human_score)
+                yield self.text_to_instance(
+                        [Token(word) for word in mt_words],
+                        [Token(word) for word in ref_words],
+                        human_score)
 
 class Ruse(Model):
-    def __init__(self, word_embeddings: TextFieldEmbedder, encoder : Seq2seqEncoder, vocab : Vocabulary) -> None:
+    def __init__(self, word_embeddings: TextFieldEmbedder, encoder: Seq2VecEncoder, vocab: Vocabulary) -> None:
         super().__init__(vocab)
         self.word_embeddings = word_embeddings
         self.encoder = encoder
-        self.linear = torch.nn.Linear(in_features=encoder.get_output_dim(), out_features.get_vocab_size('tokens'))
-        self.accuracy = PearsonCorrelation()
+        #self.mlp = torch.nn.Linear(in_features=encoder.get_output_dim(),
+        #          out_features=1)
+        hidden_dim = 128
+        self.mlp = torch.nn.Sequential(
+                torch.nn.Linear(in_features=encoder.get_output_dim()*4, out_features=hidden_dim),
+                torch.nn.Tanh(),
+                torch.nn.Linear(in_features=hidden_dim, out_features=hidden_dim),
+                torch.nn.Tanh(),
+                torch.nn.Linear(in_features=hidden_dim, out_features=1)
+            )
+        self.covar = Covariance()
+        self.pearson = PearsonCorrelation()
 
-    def forward(self, sentence: Dict[str, torch.Tensor], labels: torch.Tensor = None) -> None:
-        mask = get_text_field_mask(sentence)
-        embeddings = self.word_embeddings(sentence)
-        encoder_out = self.encoder(embeddings, mask)
-        tag_logits = self.hidden2tag(encoder_out)
-        output = {"tag_logits": tag_logits}
+    def forward(self, mt_sent: Dict[str, torch.Tensor], ref_sent: Dict[str, torch.Tensor],
+            human_score: np.ndarray) -> Dict[str, torch.Tensor]:
+        mt_mask, ref_mask = get_text_field_mask(mt_sent), get_text_field_mask(ref_sent)
+        mt_embeddings, ref_embeddings = self.word_embeddings(mt_sent), self.word_embeddings(ref_sent)
+        mt_enc_out, ref_enc_out = self.encoder(mt_embeddings, mt_mask), self.encoder(ref_embeddings, ref_mask)
+    
+        cat = torch.cat((mt_enc_out, ref_enc_out, torch.mul(mt_enc_out, ref_enc_out), torch.abs(mt_enc_out - ref_enc_out)), 1)
+        reg = self.mlp(cat)
+        output = {'reg' : reg}
+
+        if human_score is not None:
+            # running metric calculation
+            self.covar(reg, human_score)
+            self.pearson(reg, human_score)
+
+            # calculate mean squared error
+            delta = reg - human_score
+            output['loss'] = torch.mul(delta, delta).sum()
 
         return output
 
+    def get_metrics(self, reset: bool = False) -> Dict[str, float]:
+        return {"covar": self.covar.get_metric(reset), 'pearson': self.pearson.get_metric(reset)}
 
-def main():
-    EMBEDDING_DIM = 6
 
-    thisdir = path.dirname(path.realpath(__file__))
-    datadir = path.join(thisdir, "data", "trg-en")
-    reader = MyDatasetReader()
+this_dir = path.dirname(path.realpath(__file__))
+data_dir = path.join(this_dir, "data", "trg-en")
+reader = MyDatasetReader()
 
-    dataset = reader.read(cached_path(
-        path.join(datadir, "combined")))
+dataset = reader.read(cached_path(
+    path.join(datadir, "combined")))
 
-    vocab = Vocabulary.from_instances(dataset)
+vocab = Vocabulary.from_instances(dataset)
 
-    token_embedding = Embedding(num_embeddings=vocab.get_vocab_size("tokens"),
-                                embedding_dim=EMBEDDING_DIM)
+EMBEDDING_DIM = 64
+HIDDEN_DIM = 64
+NUM_LAYERS = 2
 
-if __name__ == "__main__":
-    main()
+token_embedding = Embedding(num_embeddings=vocab.get_vocab_size('tokens'),
+                            embedding_dim=EMBEDDING_DIM)
+word_embeddings = BasicTextFieldEmbedder({"tokens": token_embedding})
+lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, batch_first=True))
+
+model = Ruse(word_embeddings, lstm, vocab)
+
+optimizer = optim.SGD(model.parameters(), lr=0.1)
+
+iterator = BucketIterator(batch_size=2, sorting_keys=[("mt_sent", "num_tokens")])
+iterator.index_with(vocab)
+
+trainer = Trainer(model=model,
+                  optimizer=optimizer,
+                  iterator=iterator,
+                  cuda_device=0,
+                  train_dataset=dataset,
+                  validation_dataset=dataset,
+                  patience=10,
+                  num_epochs=1000)
+
+trainer.train()
