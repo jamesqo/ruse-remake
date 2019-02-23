@@ -1,3 +1,4 @@
+import os
 from os import path
 
 from typing import Iterator, List, Dict
@@ -25,13 +26,13 @@ from allennlp.modules.token_embedders import Embedding
 from allennlp.modules.seq2vec_encoders.pytorch_seq2vec_wrapper import Seq2VecEncoder, PytorchSeq2VecWrapper
 from allennlp.nn.util import get_text_field_mask, sequence_cross_entropy_with_logits
 
-from allennlp.training.metrics import CategoricalAccuracy, PearsonCorrelation
+from allennlp.training.metrics import Covariance, CategoricalAccuracy, PearsonCorrelation
 
 from allennlp.data.iterators import BucketIterator
 
 from allennlp.training.trainer import Trainer
 
-from allennlp.predictors import SentenceTaggerPredictor
+#from allennlp.predictors import SentenceTaggerPredictor
 
 torch.manual_seed(1)
 
@@ -67,28 +68,44 @@ class Ruse(Model):
         super().__init__(vocab)
         self.word_embeddings = word_embeddings
         self.encoder = encoder
-        self.hidden2tag = torch.nn.Linear(in_features=encoder.get_output_dim(),
-                  out_features=vocab.get_vocab_size('labels'))
-        self.accuracy = CategoricalAccuracy()
+        #self.mlp = torch.nn.Linear(in_features=encoder.get_output_dim(),
+        #          out_features=1)
+        hidden_dim = 128
+        self.mlp = torch.nn.Sequential(
+                torch.nn.Linear(in_features=encoder.get_output_dim()*4, out_features=hidden_dim),
+                torch.nn.Tanh(),
+                torch.nn.Linear(in_features=hidden_dim, out_features=hidden_dim),
+                torch.nn.Tanh(),
+                torch.nn.Linear(in_features=hidden_dim, out_features=1)
+            )
+        self.covar = Covariance()
+        self.pearson = PearsonCorrelation()
 
     def forward(self, mt_sent: Dict[str, torch.Tensor], ref_sent: Dict[str, torch.Tensor],
             human_score: np.ndarray) -> Dict[str, torch.Tensor]:
         mt_mask, ref_mask = get_text_field_mask(mt_sent), get_text_field_mask(ref_sent)
         mt_embeddings, ref_embeddings = self.word_embeddings(mt_sent), self.word_embeddings(ref_sent)
         mt_enc_out, ref_enc_out = self.encoder(mt_embeddings, mt_mask), self.encoder(ref_embeddings, ref_mask)
-
-        batch_size, num_hidden = mt_enc_out.size()
-        dot_products = torch.bmm(mt_enc_out.view(batch_size, 1, num_hidden), ref_enc_out.view(batch_size, num_hidden, 1))
-        output = {'dots' : dot_products }
+    
+        cat = torch.cat((mt_enc_out, ref_enc_out, torch.mul(mt_enc_out, ref_enc_out), torch.abs(mt_enc_out - ref_enc_out)), 1)
+        reg = self.mlp(cat)
+        output = {'reg' : reg}
+        #print('lr', lr)
+        #print('human', human_score)
 
         if human_score is not None:
-            # calculate loss
-            output['loss'] = (dot_products - human_score).pow(2).sum()
+            # running metric calculation
+            self.covar(reg, human_score)
+            self.pearson(reg, human_score)
+
+            # calculate mean squared error
+            delta = reg - human_score
+            output['loss'] = torch.mul(delta, delta).sum()
 
         return output
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
-        return {"accuracy": self.accuracy.get_metric(reset)}
+        return {"covar": self.covar.get_metric(reset), 'pearson': self.pearson.get_metric(reset)}
 
 
 #reader = PosDatasetReader()
@@ -107,16 +124,16 @@ dataset = reader.read(cached_path(
 
 vocab = Vocabulary.from_instances(dataset)
 
-EMBEDDING_DIM = 128
-HIDDEN_DIM = 128
+EMBEDDING_DIM = 64
+HIDDEN_DIM = 64
+NUM_LAYERS = 2
 
 token_embedding = Embedding(num_embeddings=vocab.get_vocab_size('tokens'),
                             embedding_dim=EMBEDDING_DIM)
 word_embeddings = BasicTextFieldEmbedder({"tokens": token_embedding})
-lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(EMBEDDING_DIM, HIDDEN_DIM, batch_first=True))
+lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, batch_first=True))
 
 model = Ruse(word_embeddings, lstm, vocab)
-model.cuda()
 
 optimizer = optim.SGD(model.parameters(), lr=0.1)
 
@@ -126,6 +143,7 @@ iterator.index_with(vocab)
 trainer = Trainer(model=model,
                   optimizer=optimizer,
                   iterator=iterator,
+                  cuda_device=0,
                   train_dataset=dataset,
                   validation_dataset=dataset,
                   patience=10,
@@ -133,10 +151,10 @@ trainer = Trainer(model=model,
 
 trainer.train()
 
-predictor = SentenceTaggerPredictor(model, dataset_reader=reader)
-tag_logits = predictor.predict("The dog ate the apple")['tag_logits']
-tag_ids = np.argmax(tag_logits, axis=-1)
-print([model.vocab.get_token_from_index(i, 'labels') for i in tag_ids])
+#predictor = SentenceTaggerPredictor(model, dataset_reader=reader)
+#tag_logits = predictor.predict("The dog ate the apple")['tag_logits']
+#tag_ids = np.argmax(tag_logits, axis=-1)
+#print([model.vocab.get_token_from_index(i, 'labels') for i in tag_ids])
 
 # Here's how to save the model.
 with open("/tmp/model.th", 'wb') as f:
@@ -149,6 +167,6 @@ model2 = LstmTagger(word_embeddings, lstm, vocab2)
 with open("/tmp/model.th", 'rb') as f:
     model2.load_state_dict(torch.load(f))
 
-predictor2 = SentenceTaggerPredictor(model2, dataset_reader=reader)
-tag_logits2 = predictor2.predict("The dog ate the apple")['tag_logits']
-assert tag_logits2 == tag_logits
+#predictor2 = SentenceTaggerPredictor(model2, dataset_reader=reader)
+#tag_logits2 = predictor2.predict("The dog ate the apple")['tag_logits']
+#assert tag_logits2 == tag_logits
