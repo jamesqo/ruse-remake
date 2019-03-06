@@ -1,14 +1,16 @@
 from os import path
 from typing import Iterator, List, Dict
+import sys
 
+import numpy as np
 import torch
 import torch.optim as optim
-import numpy as np
+from torch.utils.data.dataset import Subset
 
 from allennlp.common.file_utils import cached_path
 from allennlp.data import Instance
 from allennlp.data.dataset_readers import DatasetReader
-from allennlp.data.fields import ArrayField, TextField, SequenceLabelField
+from allennlp.data.fields import ArrayField, MetadataField, TextField, SequenceLabelField
 from allennlp.data.iterators import BucketIterator
 from allennlp.data.token_indexers import TokenIndexer, SingleIdTokenIndexer
 from allennlp.data.tokenizers import Token
@@ -35,23 +37,28 @@ class WmtDatasetReader(DatasetReader):
     def text_to_instance(self,
                          mt_tokens: List[Token],
                          ref_tokens: List[Token],
-                         human_score: float) -> Instance:
+                         human_score: float,
+                         origin: str) -> Instance:
         mt_sent = TextField(mt_tokens, self.token_indexers)
         ref_sent = TextField(ref_tokens, self.token_indexers)
         human_score = ArrayField(np.array([human_score]))
+        origin = MetadataField(origin)
 
-        fields = {"mt_sent": mt_sent, "ref_sent": ref_sent, "human_score": human_score}
-        return Instance(fields)
+        return Instance({"mt_sent": mt_sent,
+                         "ref_sent": ref_sent,
+                         "human_score": human_score,
+                         "origin": origin})
 
     def _read(self, file_path: str) -> Iterator[Instance]:
         with open(file_path, mode='r', encoding='utf-8') as file:
             for line in file:
-                mt_text, ref_text, score_text = line.strip().split('\t')
+                mt_text, ref_text, score_text, origin = line.strip().split('\t')
                 mt_words, ref_words, human_score = mt_text.split(), ref_text.split(), float(score_text)
                 yield self.text_to_instance(
                         [Token(word) for word in mt_words],
                         [Token(word) for word in ref_words],
-                        human_score)
+                        human_score,
+                        origin)
 
 class RuseModel(Model):
     def __init__(self,
@@ -108,6 +115,11 @@ class RuseModel(Model):
         return {"covar": self.covar.get_metric(reset),
                 "pearson": self.pearson.get_metric(reset)}
 
+def get_indices_with_origin(dataset, origin):
+    for i, instance in enumerate(dataset):
+        org = instance.fields['origin'].metadata
+        if org == origin:
+            yield i
 
 THIS_DIR = path.dirname(path.realpath(__file__))
 DATA_DIR = path.join(THIS_DIR, 'data', 'trg-en')
@@ -117,6 +129,10 @@ WEIGHTS_FILE = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_5
 
 reader = WmtDatasetReader()
 dataset = reader.read(cached_path(DATASET_PATH))
+
+wmt2015_dataset = Subset(dataset, get_indices_with_origin(dataset, 'newstest2015'))
+wmt2016_dataset = Subset(dataset, get_indices_with_origin(dataset, 'newstest2016'))
+wmt2017_dataset = Subset(dataset, get_indices_with_origin(dataset, 'newstest2017'))
 
 vocab = Vocabulary.from_instances(dataset)
 # TODO: Figure out the best parameters here
@@ -139,8 +155,8 @@ trainer = Trainer(model=model,
                   optimizer=optimizer,
                   iterator=iterator,
                   cuda_device=0,
-                  train_dataset=dataset,
-                  validation_dataset=dataset,
+                  train_dataset=(wmt2015_dataset + wmt2016_dataset),
+                  validation_dataset=wmt2017_dataset,
                   patience=10,
                   num_epochs=1000)
 trainer.train()
