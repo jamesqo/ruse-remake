@@ -115,11 +115,13 @@ class RuseModel(Model):
         return {"covar": self.covar.get_metric(reset),
                 "pearson": self.pearson.get_metric(reset)}
 
-def get_indices_with_origin(dataset, origin):
+def select_origin(dataset, origin):
+    indices = []
     for i, instance in enumerate(dataset):
         org = instance.fields['origin'].metadata
         if org == origin:
-            yield i
+            indices.append(i)
+    return indices
 
 THIS_DIR = path.dirname(path.realpath(__file__))
 DATA_DIR = path.join(THIS_DIR, 'data', 'trg-en')
@@ -130,9 +132,9 @@ WEIGHTS_FILE = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_5
 reader = WmtDatasetReader()
 dataset = reader.read(cached_path(DATASET_PATH))
 
-wmt2015_dataset = Subset(dataset, get_indices_with_origin(dataset, 'newstest2015'))
-wmt2016_dataset = Subset(dataset, get_indices_with_origin(dataset, 'newstest2016'))
-wmt2017_dataset = Subset(dataset, get_indices_with_origin(dataset, 'newstest2017'))
+wmt2015_dataset = Subset(dataset, select_origin(dataset, 'newstest2015'))
+wmt2016_dataset = Subset(dataset, select_origin(dataset, 'newstest2016'))
+wmt2017_dataset = Subset(dataset, select_origin(dataset, 'newstest2017'))
 
 vocab = Vocabulary.from_instances(dataset)
 # TODO: Figure out the best parameters here
