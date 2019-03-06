@@ -5,6 +5,7 @@ import sys
 import numpy as np
 import torch
 import torch.optim as optim
+from torch.utils.data import random_split
 from torch.utils.data.dataset import Subset
 
 from allennlp.common.file_utils import cached_path
@@ -99,7 +100,7 @@ class RuseModel(Model):
                            torch.mul(mt_encoder_out, ref_encoder_out),
                            torch.abs(mt_encoder_out - ref_encoder_out)), 1)
         reg = self.mlp(input)
-        output = {'reg': reg}
+        output = {"reg": reg}
 
         if human_score is not None:
             # run metric calculation
@@ -116,13 +117,18 @@ class RuseModel(Model):
         return {"covar": self.covar.get_metric(reset),
                 "pearson": self.pearson.get_metric(reset)}
 
-def select_origin(dataset, origin):
+def select_by_origin(dataset, origin):
     indices = []
     for i, instance in enumerate(dataset):
         org = instance.fields['origin'].metadata
         if org == origin:
             indices.append(i)
     return indices
+
+def train_val_split(dataset, ratio):
+    train_size = int(ratio * len(dataset))
+    val_size = len(dataset) - train_size
+    return random_split(dataset, [train_size, val_size])
 
 THIS_DIR = path.dirname(path.realpath(__file__))
 DATA_DIR = path.join(THIS_DIR, 'data', 'trg-en')
@@ -133,9 +139,16 @@ WEIGHTS_FILE = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_5
 reader = WmtDatasetReader()
 dataset = reader.read(cached_path(DATASET_PATH))
 
-wmt2015_dataset = Subset(dataset, select_origin(dataset, 'newstest2015'))
-wmt2016_dataset = Subset(dataset, select_origin(dataset, 'newstest2016'))
-wmt2017_dataset = Subset(dataset, select_origin(dataset, 'newstest2017'))
+ratio = 0.9
+wmt2015 = Subset(dataset, select_by_origin(dataset, 'newstest2015'))
+wmt2015_train, wmt2015_val = train_val_split(wmt2015, ratio)
+wmt2016 = Subset(dataset, select_by_origin(dataset, 'newstest2016'))
+wmt2016_train, wmt2016_val = train_val_split(wmt2016, ratio)
+wmt2017 = Subset(dataset, select_by_origin(dataset, 'newstest2017'))
+wmt2017_train, wmt2017_val = train_val_split(wmt2017, ratio)
+
+train_dataset = (wmt2015_train + wmt2016_train + wmt2017_train)
+val_dataset = (wmt2015_val + wmt2016_val + wmt2017_val)
 
 vocab = Vocabulary.from_instances(dataset)
 # TODO: Figure out the best parameters here
@@ -144,6 +157,7 @@ elmo = Elmo(cached_path(OPTIONS_FILE),
             num_output_representations=2,
             dropout=0)
 word_embeddings = ELMoTextFieldEmbedder({"tokens": elmo})
+# TODO: Figure out the best parameters here
 lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(input_size=elmo.get_output_dim(),
                                            hidden_size=64,
                                            num_layers=2,
@@ -151,15 +165,16 @@ lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(input_size=elmo.get_output_dim(),
 
 model = RuseModel(word_embeddings, lstm, vocab)
 optimizer = optim.SGD(model.parameters(), lr=0.1)
-iterator = BucketIterator(batch_size=2, sorting_keys=[("mt_sent", "num_tokens")])
+iterator = BucketIterator(batch_size=2,
+                          sorting_keys=[("mt_sent", "num_tokens")])
 iterator.index_with(vocab)
 
 trainer = Trainer(model=model,
                   optimizer=optimizer,
                   iterator=iterator,
                   cuda_device=0,
-                  train_dataset=(wmt2015_dataset + wmt2016_dataset),
-                  validation_dataset=wmt2017_dataset,
+                  train_dataset=train_dataset,
+                  validation_dataset=val_dataset,
                   patience=10,
                   num_epochs=1000)
 trainer.train()
