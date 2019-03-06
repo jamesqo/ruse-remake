@@ -7,13 +7,14 @@ import numpy as np
 
 from allennlp.common.file_utils import cached_path
 from allennlp.data import Instance
-from allennlp.data.fields import ArrayField, TextField, SequenceLabelField
 from allennlp.data.dataset_readers import DatasetReader
+from allennlp.data.fields import ArrayField, TextField, SequenceLabelField
 from allennlp.data.iterators import BucketIterator
 from allennlp.data.token_indexers import TokenIndexer, SingleIdTokenIndexer
 from allennlp.data.tokenizers import Token
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.models import Model
+from allennlp.modules.elmo import Elmo, ELMoTokenCharactersIndexer
 from allennlp.modules.text_field_embedders import TextFieldEmbedder, BasicTextFieldEmbedder
 from allennlp.modules.token_embedders import Embedding
 from allennlp.modules.seq2vec_encoders.pytorch_seq2vec_wrapper import Seq2VecEncoder, PytorchSeq2VecWrapper
@@ -22,12 +23,14 @@ from allennlp.training.metrics import Covariance, CategoricalAccuracy, PearsonCo
 from allennlp.training.trainer import Trainer
 from allennlp.predictors import SentenceTaggerPredictor
 
+from embedders import ELMoTextFieldEmbedder
+
 torch.manual_seed(1)
 
 class WmtDatasetReader(DatasetReader):
     def __init__(self, token_indexers: Dict[str, TokenIndexer] = None) -> None:
         super().__init__(lazy=False)
-        self.token_indexers = token_indexers or {"tokens": SingleIdTokenIndexer()}
+        self.token_indexers = token_indexers or {"tokens": ELMoTokenCharactersIndexer()}
 
     def text_to_instance(self,
                          mt_tokens: List[Token],
@@ -51,8 +54,6 @@ class WmtDatasetReader(DatasetReader):
                         human_score)
 
 class RuseModel(Model):
-    HIDDEN_DIM = 128
-
     def __init__(self,
                  word_embeddings: TextFieldEmbedder,
                  encoder: Seq2VecEncoder,
@@ -60,12 +61,14 @@ class RuseModel(Model):
         super().__init__(vocab)
         self.word_embeddings = word_embeddings
         self.encoder = encoder
+
+        hidden_dim = 128
         self.mlp = torch.nn.Sequential(
-                torch.nn.Linear(in_features=encoder.get_output_dim()*4, out_features=HIDDEN_DIM),
+                torch.nn.Linear(in_features=encoder.get_output_dim()*4, out_features=hidden_dim),
                 torch.nn.Tanh(),
-                torch.nn.Linear(in_features=HIDDEN_DIM, out_features=HIDDEN_DIM),
+                torch.nn.Linear(in_features=hidden_dim, out_features=hidden_dim),
                 torch.nn.Tanh(),
-                torch.nn.Linear(in_features=HIDDEN_DIM, out_features=1)
+                torch.nn.Linear(in_features=hidden_dim, out_features=1)
             )
         self.covar = Covariance()
         self.pearson = PearsonCorrelation()
@@ -102,25 +105,30 @@ class RuseModel(Model):
         return output
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
-        return {'covar': self.covar.get_metric(reset), 'pearson': self.pearson.get_metric(reset)}
+        return {"covar": self.covar.get_metric(reset),
+                "pearson": self.pearson.get_metric(reset)}
 
 
 THIS_DIR = path.dirname(path.realpath(__file__))
 DATA_DIR = path.join(THIS_DIR, 'data', 'trg-en')
 DATASET_PATH = path.join(DATA_DIR, 'combined')
-
-EMBEDDING_DIM = 64
-HIDDEN_DIM = 64
-NUM_LAYERS = 2
+OPTIONS_FILE = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json"
+WEIGHTS_FILE = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"
 
 reader = WmtDatasetReader()
 dataset = reader.read(cached_path(DATASET_PATH))
 
 vocab = Vocabulary.from_instances(dataset)
-token_embedding = Embedding(num_embeddings=vocab.get_vocab_size('tokens'),
-                            embedding_dim=EMBEDDING_DIM)
-word_embeddings = BasicTextFieldEmbedder({'tokens': token_embedding})
-lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(EMBEDDING_DIM, HIDDEN_DIM, NUM_LAYERS, batch_first=True))
+# TODO: Figure out the best parameters here
+elmo = Elmo(cached_path(OPTIONS_FILE),
+            cached_path(WEIGHTS_FILE),
+            num_output_representations=2,
+            dropout=0)
+word_embeddings = ELMoTextFieldEmbedder({"tokens": elmo})
+lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(input_size=elmo.get_output_dim(),
+                                           hidden_size=64,
+                                           num_layers=2,
+                                           batch_first=True))
 
 model = RuseModel(word_embeddings, lstm, vocab)
 optimizer = optim.SGD(model.parameters(), lr=0.1)
