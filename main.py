@@ -83,7 +83,8 @@ class RuseModel(Model):
     def forward(self,
                 mt_sent: Dict[str, torch.Tensor],
                 ref_sent: Dict[str, torch.Tensor],
-                human_score: np.ndarray) -> Dict[str, torch.Tensor]:
+                human_score: np.ndarray,
+                origin: str) -> Dict[str, torch.Tensor]:
         mt_mask = get_text_field_mask(mt_sent)
         ref_mask = get_text_field_mask(ref_sent)
 
