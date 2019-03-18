@@ -142,8 +142,9 @@ dataset = reader.read(cached_path(DATASET_PATH))
 # TODO: We should be implementing 10-fold cross validation.
 # We split each dataset into 10 pieces. This gives us 30 segments.
 # We combine the segments in triples, giving us 10 segments equally composed of 2015/16/17 data.
-# 10 times, we train on 9 of the segments and validate on 1 of them. We obtain a validation loss each time.
-# We choose the split that minimizes validation loss.
+# 10 times, we train on 9 of the segments and validate on 1 of them.
+# We get a validation loss each time, and the average of these is the "cross-validation loss".
+# We choose the set of hyperparameters (via grid search) that minimizes the cross-validation loss.
 ratio = 0.9
 wmt2015 = Subset(dataset, select_by_origin(dataset, 'newstest2015'))
 wmt2015_train, wmt2015_val = train_val_split(wmt2015, ratio)
