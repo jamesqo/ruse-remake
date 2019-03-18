@@ -165,9 +165,18 @@ lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(input_size=elmo.get_output_dim(),
 
 model = RuseModel(word_embeddings, lstm, vocab)
 optimizer = optim.Adam(model.parameters())
+# TODO: What kind of iterator should be used?
 iterator = BucketIterator(batch_size=2,
                           sorting_keys=[("mt_sent", "num_tokens")])
 iterator.index_with(vocab)
+
+# Temp
+train_generator = iterator(train_dataset,
+                           num_epochs=1,
+                           shuffle=True)
+for item in train_generator:
+    print(item)
+sys.exit(0)
 
 trainer = Trainer(model=model,
                   optimizer=optimizer,
