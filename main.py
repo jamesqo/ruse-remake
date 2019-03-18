@@ -109,7 +109,7 @@ class RuseModel(Model):
 
             # calculate mean squared error
             delta = reg - human_score
-            output['loss'] = torch.mul(delta, delta).sum()
+            output["loss"] = torch.mul(delta, delta).sum()
 
         return output
 
@@ -120,7 +120,7 @@ class RuseModel(Model):
 def select_by_origin(dataset, origin):
     indices = []
     for i, instance in enumerate(dataset):
-        org = instance.fields['origin'].metadata
+        org = instance.fields["origin"].metadata
         if org == origin:
             indices.append(i)
     return indices
