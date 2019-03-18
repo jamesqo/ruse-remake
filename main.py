@@ -174,8 +174,10 @@ iterator.index_with(vocab)
 train_generator = iterator(train_dataset,
                            num_epochs=1,
                            shuffle=True)
-for item in train_generator:
-    print(item)
+#for item in train_generator:
+#    print(item)
+item = next(train_generator)
+print(item)
 sys.exit(0)
 
 trainer = Trainer(model=model,
