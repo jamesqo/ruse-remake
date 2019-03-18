@@ -139,6 +139,11 @@ WEIGHTS_FILE = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_5
 reader = WmtDatasetReader()
 dataset = reader.read(cached_path(DATASET_PATH))
 
+# TODO: We should be implementing 10-fold cross validation.
+# We split each dataset into 10 pieces. This gives us 30 segments.
+# We combine the segments in triples, giving us 10 segments equally composed of 2015/16/17 data.
+# 10 times, we train on 9 of the segments and validate on 1 of them. We obtain a validation loss each time.
+# We choose the split that minimizes validation loss.
 ratio = 0.9
 wmt2015 = Subset(dataset, select_by_origin(dataset, 'newstest2015'))
 wmt2015_train, wmt2015_val = train_val_split(wmt2015, ratio)
@@ -167,7 +172,8 @@ model = RuseModel(word_embeddings, lstm, vocab)
 optimizer = optim.Adam(model.parameters())
 # TODO: What kind of iterator should be used?
 iterator = BucketIterator(batch_size=64,
-                          sorting_keys=[("mt_sent", "num_tokens")])
+                          sorting_keys=[("mt_sent", "num_tokens"),
+                                        ("ref_sent", "num_tokens")])
 iterator.index_with(vocab)
 
 trainer = Trainer(model=model,
