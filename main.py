@@ -139,7 +139,13 @@ dataset = reader.read(cached_path(DATASET_PATH))
 kfold = StratifiedKFold(dataset, k=10, grouping=get_origin)
 for train, val in kfold:
     print("train len:", len(train))
+    print("train num 15 insts:", len([inst for inst in train if get_origin(inst) == 'newstest2015']))
+    print("train num 16 insts:", len([inst for inst in train if get_origin(inst) == 'newstest2016']))
+    print("train num 17 insts:", len([inst for inst in train if get_origin(inst) == 'newstest2017']))
     print("val len:", len(val))
+    print("val num 15 insts:", len([inst for inst in val if get_origin(inst) == 'newstest2015']))
+    print("val num 16 insts:", len([inst for inst in val if get_origin(inst) == 'newstest2016']))
+    print("val num 17 insts:", len([inst for inst in val if get_origin(inst) == 'newstest2017']))
 sys.exit(0)
 
 vocab = Vocabulary.from_instances(dataset)
