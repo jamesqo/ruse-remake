@@ -28,7 +28,7 @@ def get_folds(partitions, k):
     folds = []
     for i in range(0, k):
         # Add 1 split from each class partition.
-        splits = [partition[i] for partition in partitions]
+        splits = [partition[i] for partition in partitions.values()]
         folds.append([inst for split in splits for inst in split]) # Flattens 'splits' into a single list
     return folds
 
