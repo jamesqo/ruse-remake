@@ -27,6 +27,7 @@ from allennlp.training.trainer import Trainer
 from allennlp.predictors import SentenceTaggerPredictor
 
 from embedders import ELMoTextFieldEmbedder
+from kfold import StratifiedKFold
 
 torch.manual_seed(1)
 
@@ -117,18 +118,8 @@ class RuseModel(Model):
         return {"covar": self.covar.get_metric(reset),
                 "pearson": self.pearson.get_metric(reset)}
 
-def select_by_origin(dataset, origin):
-    indices = []
-    for i, instance in enumerate(dataset):
-        org = instance.fields["origin"].metadata
-        if org == origin:
-            indices.append(i)
-    return indices
-
-def train_val_split(dataset, ratio):
-    train_size = int(ratio * len(dataset))
-    val_size = len(dataset) - train_size
-    return random_split(dataset, [train_size, val_size])
+def get_origin(instance):
+    return instance.fields["origin"].metadata
 
 THIS_DIR = path.dirname(path.realpath(__file__))
 DATA_DIR = path.join(THIS_DIR, 'data', 'trg-en')
@@ -145,16 +136,13 @@ dataset = reader.read(cached_path(DATASET_PATH))
 # 10 times, we train on 9 of the segments and validate on 1 of them.
 # We get a validation loss each time, and the average of these is the "cross-validation loss".
 # We choose the set of hyperparameters (via grid search) that minimizes the cross-validation loss.
-ratio = 0.9
-wmt2015 = Subset(dataset, select_by_origin(dataset, 'newstest2015'))
-wmt2015_train, wmt2015_val = train_val_split(wmt2015, ratio)
-wmt2016 = Subset(dataset, select_by_origin(dataset, 'newstest2016'))
-wmt2016_train, wmt2016_val = train_val_split(wmt2016, ratio)
-wmt2017 = Subset(dataset, select_by_origin(dataset, 'newstest2017'))
-wmt2017_train, wmt2017_val = train_val_split(wmt2017, ratio)
-
-train_dataset = (wmt2015_train + wmt2016_train + wmt2017_train)
-val_dataset = (wmt2015_val + wmt2016_val + wmt2017_val)
+kfold = StratifiedKFold(dataset, k=10, grouping=get_origin)
+for train, val in kfold:
+    print(train)
+    print(len(train))
+    print(val)
+    print(len(val))
+sys.exit(0)
 
 vocab = Vocabulary.from_instances(dataset)
 # TODO: Figure out the best parameters here
