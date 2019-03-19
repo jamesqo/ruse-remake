@@ -137,7 +137,10 @@ dataset = reader.read(cached_path(DATASET_PATH))
 # We get a validation loss each time, and the average of these is the "cross-validation loss".
 # We choose the set of hyperparameters (via grid search) that minimizes the cross-validation loss.
 grid = {
-    "batch_size": [64, 128, 256, 512, 1024]
+    "num_layers": [1, 2, 3],
+    # TODO: num_units
+    "batch_size": [64, 128, 256, 512, 1024],
+    "dropout": [0.1, 0.3, 0.5]
 }
 grid_iter = GridIterator(grid)
 
@@ -151,12 +154,12 @@ def __(params):
     elmo = Elmo(cached_path(OPTIONS_FILE),
                 cached_path(WEIGHTS_FILE),
                 num_output_representations=2,
-                dropout=0)
+                dropout=params["dropout"]) # TODO: Does dropout refer to the LSTM or ELMo?
     word_embeddings = ELMoTextFieldEmbedder({"tokens": elmo})
     # TODO: Figure out the best parameters here
     lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(input_size=elmo.get_output_dim(),
                                                hidden_size=64,
-                                               num_layers=2,
+                                               num_layers=params["num_layers"],
                                                batch_first=True))
 
     model = RuseModel(word_embeddings, lstm, vocab)
