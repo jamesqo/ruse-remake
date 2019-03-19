@@ -47,9 +47,10 @@ class StratifiedKFold(object):
         if self.excl_index == self.num_folds:
             raise StopIteration("Already yielded K train/test splits.")
 
+        train_folds = self.folds.copy()
+        del train_folds[self.excl_index]
+        train = [inst for fold in train_folds for inst in fold]
         test = self.folds[self.excl_index]
-        train = self.folds.copy()
-        del train[self.excl_index]
 
         self.excl_index += 1
         return train, test

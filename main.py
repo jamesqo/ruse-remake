@@ -138,10 +138,8 @@ dataset = reader.read(cached_path(DATASET_PATH))
 # We choose the set of hyperparameters (via grid search) that minimizes the cross-validation loss.
 kfold = StratifiedKFold(dataset, k=10, grouping=get_origin)
 for train, val in kfold:
-    print(train)
-    print(len(train))
-    print(val)
-    print(len(val))
+    print("train len:", len(train))
+    print("val len:", len(val))
 sys.exit(0)
 
 vocab = Vocabulary.from_instances(dataset)
