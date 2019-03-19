@@ -118,7 +118,7 @@ class RuseModel(Model):
         return {"covar": self.covar.get_metric(reset),
                 "pearson": self.pearson.get_metric(reset)}
 
-def get_origin(instance):
+def origin_of(instance):
     return instance.fields["origin"].metadata
 
 THIS_DIR = path.dirname(path.realpath(__file__))
@@ -136,45 +136,54 @@ dataset = reader.read(cached_path(DATASET_PATH))
 # 10 times, we train on 9 of the segments and validate on 1 of them.
 # We get a validation loss each time, and the average of these is the "cross-validation loss".
 # We choose the set of hyperparameters (via grid search) that minimizes the cross-validation loss.
-kfold = StratifiedKFold(dataset, k=10, grouping=get_origin)
-for train, val in kfold:
-    print("train len:", len(train))
-    print("train num 15 insts:", len([inst for inst in train if get_origin(inst) == 'newstest2015']))
-    print("train num 16 insts:", len([inst for inst in train if get_origin(inst) == 'newstest2016']))
-    print("train num 17 insts:", len([inst for inst in train if get_origin(inst) == 'newstest2017']))
-    print("val len:", len(val))
-    print("val num 15 insts:", len([inst for inst in val if get_origin(inst) == 'newstest2015']))
-    print("val num 16 insts:", len([inst for inst in val if get_origin(inst) == 'newstest2016']))
-    print("val num 17 insts:", len([inst for inst in val if get_origin(inst) == 'newstest2017']))
-sys.exit(0)
+grid = {
+    "batch_size": [64, 128, 256, 512, 1024]
+}
+grid_iter = GridIterator(grid)
 
-vocab = Vocabulary.from_instances(dataset)
-# TODO: Figure out the best parameters here
-elmo = Elmo(cached_path(OPTIONS_FILE),
-            cached_path(WEIGHTS_FILE),
-            num_output_representations=2,
-            dropout=0)
-word_embeddings = ELMoTextFieldEmbedder({"tokens": elmo})
-# TODO: Figure out the best parameters here
-lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(input_size=elmo.get_output_dim(),
-                                           hidden_size=64,
-                                           num_layers=2,
-                                           batch_first=True))
+# TODO: We should cache the results so we don't have to train again with these parameters
+best_params = min(grid_iter, key=__)
+print(best_params)
 
-model = RuseModel(word_embeddings, lstm, vocab)
-optimizer = optim.Adam(model.parameters())
-# TODO: What kind of iterator should be used?
-iterator = BucketIterator(batch_size=64,
-                          sorting_keys=[("mt_sent", "num_tokens"),
-                                        ("ref_sent", "num_tokens")])
-iterator.index_with(vocab)
+def __(params):
+    vocab = Vocabulary.from_instances(dataset)
+    # TODO: Figure out the best parameters here
+    elmo = Elmo(cached_path(OPTIONS_FILE),
+                cached_path(WEIGHTS_FILE),
+                num_output_representations=2,
+                dropout=0)
+    word_embeddings = ELMoTextFieldEmbedder({"tokens": elmo})
+    # TODO: Figure out the best parameters here
+    lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(input_size=elmo.get_output_dim(),
+                                               hidden_size=64,
+                                               num_layers=2,
+                                               batch_first=True))
 
-trainer = Trainer(model=model,
-                  optimizer=optimizer,
-                  iterator=iterator,
-                  cuda_device=0,
-                  train_dataset=train_dataset,
-                  validation_dataset=val_dataset,
-                  patience=10,
-                  num_epochs=1000)
-trainer.train()
+    model = RuseModel(word_embeddings, lstm, vocab)
+    optimizer = optim.Adam(model.parameters())
+    # TODO: What kind of iterator should be used?
+    iterator = BucketIterator(batch_size=params["batch_size"],
+                              sorting_keys=[("mt_sent", "num_tokens"),
+                                            ("ref_sent", "num_tokens")])
+    iterator.index_with(vocab)
+
+    # Calculate the validation loss for each train-test split
+    losses = []
+    kfold = StratifiedKFold(dataset, k=10, grouping=origin_of)
+    for train, val in kfold:
+        # TODO: Figure out best hyperparameters
+        trainer = Trainer(model=model,
+                          optimizer=optimizer,
+                          iterator=iterator,
+                          cuda_device=0,
+                          train_dataset=train,
+                          validation_dataset=val,
+                          patience=10,
+                          num_epochs=1000)
+        trainer.train()
+
+        # TODO: Better way to access the validation loss?
+        loss, _ = trainer._validation_loss()
+        losses.append(loss)
+    average_loss = np.mean(losses)
+    return average_loss
