@@ -27,9 +27,12 @@ from allennlp.training.trainer import Trainer
 from allennlp.predictors import SentenceTaggerPredictor
 
 from embedders import ELMoTextFieldEmbedder
+from grid_search import grid_search_iter
 from kfold import StratifiedKFold
 
 torch.manual_seed(1)
+
+### TODO: Separate these classes out into new files
 
 class WmtDatasetReader(DatasetReader):
     def __init__(self, token_indexers: Dict[str, TokenIndexer] = None) -> None:
@@ -118,37 +121,12 @@ class RuseModel(Model):
         return {"covar": self.covar.get_metric(reset),
                 "pearson": self.pearson.get_metric(reset)}
 
+### End TODO
+
 def origin_of(instance):
     return instance.fields["origin"].metadata
 
-THIS_DIR = path.dirname(path.realpath(__file__))
-DATA_DIR = path.join(THIS_DIR, 'data', 'trg-en')
-DATASET_PATH = path.join(DATA_DIR, 'combined')
-OPTIONS_FILE = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json"
-WEIGHTS_FILE = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"
-
-reader = WmtDatasetReader()
-dataset = reader.read(cached_path(DATASET_PATH))
-
-# TODO: We should be implementing 10-fold cross validation.
-# We split each dataset into 10 pieces. This gives us 30 segments.
-# We combine the segments in triples, giving us 10 segments equally composed of 2015/16/17 data. (aka **stratified** k fold CV)
-# 10 times, we train on 9 of the segments and validate on 1 of them.
-# We get a validation loss each time, and the average of these is the "cross-validation loss".
-# We choose the set of hyperparameters (via grid search) that minimizes the cross-validation loss.
-grid = {
-    "num_layers": [1, 2, 3],
-    # TODO: num_units
-    "batch_size": [64, 128, 256, 512, 1024],
-    "dropout": [0.1, 0.3, 0.5]
-}
-grid_iter = GridIterator(grid)
-
-# TODO: We should cache the results so we don't have to train again with these parameters
-best_params = min(grid_iter, key=__)
-print(best_params)
-
-def __(params):
+def calculate_cv_loss(params):
     vocab = Vocabulary.from_instances(dataset)
     # TODO: Figure out the best parameters here
     elmo = Elmo(cached_path(OPTIONS_FILE),
@@ -170,7 +148,6 @@ def __(params):
                                             ("ref_sent", "num_tokens")])
     iterator.index_with(vocab)
 
-    # Calculate the validation loss for each train-test split
     losses = []
     kfold = StratifiedKFold(dataset, k=10, grouping=origin_of)
     for train, val in kfold:
@@ -184,9 +161,31 @@ def __(params):
                           patience=10,
                           num_epochs=1000)
         trainer.train()
-
         # TODO: Better way to access the validation loss?
         loss, _ = trainer._validation_loss()
         losses.append(loss)
-    average_loss = np.mean(losses)
-    return average_loss
+    mean_loss = np.mean(losses)
+    return mean_loss
+
+THIS_DIR = path.dirname(path.realpath(__file__))
+DATA_DIR = path.join(THIS_DIR, 'data', 'trg-en')
+DATASET_PATH = path.join(DATA_DIR, 'combined')
+OPTIONS_FILE = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json"
+WEIGHTS_FILE = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"
+
+reader = WmtDatasetReader()
+dataset = reader.read(cached_path(DATASET_PATH))
+
+grid = {
+    "num_layers": [1, 2, 3],
+    # TODO: num_units
+    "batch_size": [64, 128, 256, 512, 1024],
+    "dropout": [0.1, 0.3, 0.5]
+}
+all_params = grid_search_iter(grid)
+for params in all_params:
+    print(params)
+sys.exit(0)
+# TODO: We should cache the results so we don't have to train again with these parameters
+best_params = min(all_params, key=calculate_cv_loss)
+print(best_params)
