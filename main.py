@@ -61,7 +61,7 @@ def calculate_cv_loss(params):
                           cuda_device=0,
                           train_dataset=train,
                           validation_dataset=val,
-                          patience=10,
+                          patience=5,
                           num_epochs=100)
         trainer.train()
         # TODO: Better way to access the validation loss?
