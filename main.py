@@ -28,6 +28,8 @@ def origin_of(instance):
     return instance.fields["origin"].metadata
 
 def calculate_cv_loss(params):
+    print("Using hyperparameter configuration:", params)
+
     vocab = Vocabulary.from_instances(dataset)
     # TODO: Figure out the best parameters here
     elmo = Elmo(cached_path(OPTIONS_FILE),
@@ -60,12 +62,13 @@ def calculate_cv_loss(params):
                           train_dataset=train,
                           validation_dataset=val,
                           patience=10,
-                          num_epochs=1000)
+                          num_epochs=100)
         trainer.train()
         # TODO: Better way to access the validation loss?
         loss, _ = trainer._validation_loss()
         losses.append(loss)
     mean_loss = np.mean(losses)
+    print("Mean validation loss was:", mean_loss)
     return mean_loss
 
 THIS_DIR = path.dirname(path.realpath(__file__))
