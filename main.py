@@ -1,3 +1,4 @@
+from functools import partial
 from os import path
 import sys
 
@@ -8,9 +9,10 @@ from allennlp.modules.elmo import Elmo
 from allennlp.modules.seq2vec_encoders.pytorch_seq2vec_wrapper import PytorchSeq2VecWrapper
 from allennlp.training.trainer import Trainer
 
+import numpy as np
 import torch
 import torch.optim as optim
-import numpy as np
+from torch.utils.data.dataset import Subset
 
 from embedders import ELMoTextFieldEmbedder
 from grid_search import grid_search_iter
@@ -20,14 +22,17 @@ from reader import WmtDatasetReader
 
 torch.manual_seed(1)
 
-### TODO: Separate these classes out into new files
-
-### End TODO
-
 def origin_of(instance):
     return instance.fields["origin"].metadata
 
-def calculate_cv_loss(params):
+def filter_by_origin(dataset, origin):
+    indices = []
+    for i, instance in enumerate(dataset):
+        if origin_of(instance) == origin:
+            indices.append(i)
+    return Subset(dataset, indices)
+
+def calculate_cv_loss(dataset, params):
     print("Using hyperparameter configuration:", params)
 
     vocab = Vocabulary.from_instances(dataset)
@@ -80,6 +85,10 @@ WEIGHTS_FILE = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_5
 reader = WmtDatasetReader()
 dataset = reader.read(cached_path(DATASET_PATH))
 
+dataset15 = filter_by_origin(dataset, 'newstest2015')
+dataset16 = filter_by_origin(dataset, 'newstest2016')
+dataset17 = filter_by_origin(dataset, 'newstest2017')
+
 grid = {
     "num_layers": [1, 2, 3],
     # TODO: num_units
@@ -88,5 +97,7 @@ grid = {
 }
 all_params = grid_search_iter(grid)
 # TODO: We should cache the results so we don't have to train again with these parameters
-best_params = min(all_params, key=calculate_cv_loss)
-print(best_params)
+cv_loss_15_16 = partial(calculate_cv_loss, (dataset15 + dataset16))
+best_params_15_16 = min(all_params, key=cv_loss_15_16)
+print(best_params_15_16)
+# TODO: Test on WMT17 dataset
