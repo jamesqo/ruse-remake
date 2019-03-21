@@ -84,9 +84,6 @@ grid = {
     "dropout": [0.1, 0.3, 0.5]
 }
 all_params = grid_search_iter(grid)
-for params in all_params:
-    print(params)
-sys.exit(0)
 # TODO: We should cache the results so we don't have to train again with these parameters
 best_params = min(all_params, key=calculate_cv_loss)
 print(best_params)
