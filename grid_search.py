@@ -1,5 +1,6 @@
 def _grid_search_iter(keys, values, index):
     if index == len(keys):
+        yield dict()
         return
 
     key, param_values = keys[index], values[index]
