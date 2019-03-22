@@ -154,6 +154,3 @@ tags
 .history
 
 # End of https://www.gitignore.io/api/vim,python,visualstudiocode
-
-/slurm/log.out
-/slurm/log.err
