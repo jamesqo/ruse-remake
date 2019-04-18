@@ -1,3 +1,4 @@
+from collections import namedtuple
 from functools import partial
 from os import path
 import sys
@@ -22,6 +23,8 @@ from reader import WmtDatasetReader
 
 torch.manual_seed(1)
 
+TrainResults = namedtuple('TrainResults', ['cv_loss', 'state_dicts'])
+
 def origin_of(instance):
     return instance.fields["origin"].metadata
 
@@ -32,33 +35,37 @@ def filter_by_origin(dataset, origin):
             indices.append(i)
     return Subset(dataset, indices)
 
-def calculate_cv_loss(dataset, params):
+def train_on(dataset, params):
     print("Using hyperparameter configuration:", params)
 
-    vocab = Vocabulary.from_instances(dataset)
-    # TODO: Figure out the best parameters here
-    elmo = Elmo(cached_path(OPTIONS_FILE),
-                cached_path(WEIGHTS_FILE),
-                num_output_representations=2,
-                dropout=params["dropout"]) # TODO: Does dropout refer to the LSTM or ELMo?
-    word_embeddings = ELMoTextFieldEmbedder({"tokens": elmo})
-    # TODO: Figure out the best parameters here
-    lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(input_size=elmo.get_output_dim(),
-                                               hidden_size=64,
-                                               num_layers=params["num_layers"],
-                                               batch_first=True))
-
-    model = RuseModel(word_embeddings, lstm, vocab)
-    optimizer = optim.Adam(model.parameters())
-    # TODO: What kind of iterator should be used?
-    iterator = BucketIterator(batch_size=params["batch_size"],
-                              sorting_keys=[("mt_sent", "num_tokens"),
-                                            ("ref_sent", "num_tokens")])
-    iterator.index_with(vocab)
-
     losses = []
+    state_dicts = []
     kfold = StratifiedKFold(dataset, k=10, grouping=origin_of)
+
     for train, val in kfold:
+        # TODO: Figure how much of the following code we can put outside the loop
+
+        vocab = Vocabulary.from_instances(dataset)
+        # TODO: Figure out the best parameters here
+        elmo = Elmo(cached_path(OPTIONS_FILE),
+                    cached_path(WEIGHTS_FILE),
+                    num_output_representations=2,
+                    dropout=params["dropout"]) # TODO: Does dropout refer to the LSTM or ELMo?
+        word_embeddings = ELMoTextFieldEmbedder({"tokens": elmo})
+        # TODO: Figure out the best parameters here
+        lstm = PytorchSeq2VecWrapper(torch.nn.LSTM(input_size=elmo.get_output_dim(),
+                                                   hidden_size=64,
+                                                   num_layers=params["num_layers"],
+                                                   batch_first=True))
+
+        model = RuseModel(word_embeddings, lstm, vocab)
+        optimizer = optim.Adam(model.parameters())
+        # TODO: What kind of iterator should be used?
+        iterator = BucketIterator(batch_size=params["batch_size"],
+                                  sorting_keys=[("mt_sent", "num_tokens"),
+                                                ("ref_sent", "num_tokens")])
+        iterator.index_with(vocab)
+
         # TODO: Figure out best hyperparameters
         trainer = Trainer(model=model,
                           optimizer=optimizer,
@@ -72,9 +79,13 @@ def calculate_cv_loss(dataset, params):
         # TODO: Better way to access the validation loss?
         loss, _ = trainer._validation_loss()
         losses.append(loss)
+        state_dicts.append(model.state_dict())
+
     mean_loss = np.mean(losses)
     print("Mean validation loss was:", mean_loss)
-    return mean_loss
+
+    return TrainResults(cv_loss=mean_loss,
+                        state_dicts=state_dicts)
 
 THIS_DIR = path.dirname(path.realpath(__file__))
 DATA_DIR = path.join(THIS_DIR, 'data', 'trg-en')
@@ -89,6 +100,8 @@ dataset15 = filter_by_origin(dataset, 'newstest2015')
 dataset16 = filter_by_origin(dataset, 'newstest2016')
 dataset17 = filter_by_origin(dataset, 'newstest2017')
 
+# TODO: Do an exhaustive grid search
+'''
 grid = {
     "num_layers": [1, 2, 3],
     # TODO: num_units
@@ -96,8 +109,12 @@ grid = {
     "dropout": [0.1, 0.3, 0.5]
 }
 all_params = grid_search_iter(grid)
+'''
 # TODO: We should cache the results so we don't have to train again with these parameters
-cv_loss_15_16 = partial(calculate_cv_loss, (dataset15 + dataset16))
-best_params_15_16 = min(all_params, key=cv_loss_15_16)
-print(best_params_15_16)
+params = {"num_layers": 1,
+          "batch_size": 64,
+          "dropout": 0.1}
+results_15_16 = train_on((dataset15 + dataset16), params)
+print(results_15_16.cv_loss)
+print(results_15_16.state_dicts)
 # TODO: Test on WMT17 dataset
