@@ -5,11 +5,12 @@ DATA_DIR="$SCRIPT_DIR/data/trg-en"
 MT_FILE="$DATA_DIR/mt-system"
 REF_FILE="$DATA_DIR/reference"
 SCORES_FILE="$DATA_DIR/human"
+ORIGINS_FILE="$DATA_DIR/set"
 OUT_FILE="$DATA_DIR/combined"
 
 # Remove carriage returns from input files
-for file in "$MT_FILE" "$REF_FILE" "$SCORES_FILE"; do
+for file in "$MT_FILE" "$REF_FILE" "$SCORES_FILE" "$ORIGINS_FILE"; do
     sed -i 's/\r//' "$file"
 done
 
-paste -d '\t' "$MT_FILE" "$REF_FILE" "$SCORES_FILE" > "$OUT_FILE"
+paste -d '\t' "$MT_FILE" "$REF_FILE" "$SCORES_FILE" "$ORIGINS_FILE" > "$OUT_FILE"
