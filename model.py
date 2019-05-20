@@ -51,6 +51,7 @@ class RuseModel(Model):
         reg = self.mlp(input)
         output = {"reg": reg}
 
+        # TODO: Under what conditions does this occur?
         if human_score is not None:
             # run metric calculation
             self.covar(reg, human_score)

@@ -1,3 +1,14 @@
+from typing import Dict
+
+from allennlp.data.vocabulary import Vocabulary
+from allennlp.models import Model
+from allennlp.modules.seq2vec_encoders.pytorch_seq2vec_wrapper import Seq2VecEncoder
+from allennlp.modules.text_field_embedders import TextFieldEmbedder
+from allennlp.nn.util import get_text_field_mask
+from allennlp.training.metrics import CategoricalAccuracy
+
+import torch
+
 class InferSentModel(Model):
     def __init__(self,
                  word_embeddings: TextFieldEmbedder,
@@ -17,42 +28,36 @@ class InferSentModel(Model):
             )
 
         self.metrics = {
-                "accuracy" : CategoricalAccuracy(),
-                "accuracy3" : CategoricalAccuracy(top_k=3)
+            "accuracy": CategoricalAccuracy(),
+            "accuracy3": CategoricalAccuracy(top_k=3)
         }
         self.loss = torch.nn.CrossEntropyLoss()
 
-
     def forward(self,
-                mt_sent: Dict[str, torch.Tensor],
-                ref_sent: Dict[str, torch.Tensor],
-                human_score: np.ndarray,
+                sent1: Dict[str, torch.Tensor],
+                sent2: Dict[str, torch.Tensor],
+                label: str, # TODO: Is this the correct type?
                 origin: str) -> Dict[str, torch.Tensor]:
-        mt_mask = get_text_field_mask(mt_sent)
-        ref_mask = get_text_field_mask(ref_sent)
+        mask1, mask2 = map(get_text_field_mask, [sent1, sent2])
+        embed1, embed2 = map(self.word_embeddings, [sent1, sent2])
+        out1 = self.encoder(embed1, mask1)
+        out2 = self.encoder(embed2, mask2)
 
-        mt_embeddings = self.word_embeddings(mt_sent)
-        ref_embeddings = self.word_embeddings(ref_sent)
-
-        mt_encoder_out = self.encoder(mt_embeddings, mt_mask)
-        ref_encoder_out = self.encoder(ref_embeddings, ref_mask)
-    
-        input = torch.cat((mt_encoder_out,
-                           ref_encoder_out,
-                           torch.mul(mt_encoder_out, ref_encoder_out),
-                           torch.abs(mt_encoder_out - ref_encoder_out)), 1)
+        input = torch.cat((out1, out2, torch.mul(out1, out2), torch.abs(out1 - out2)), 1)
         logits = self.mlp(input)
         probs = torch.nn.softmax(logits)
         output = {"probs": probs}
 
-        if human_score is not None:
-            # run metric calculation
-            for metric in self.metrics.values():
-                metric(logits, label)
+        # XXX: Is this check still needed?
+        # if human_score is not None:
 
-            # calculate loss
-            loss = self.loss(logits, label)
-            output['loss'] = loss
+        # run metric calculation
+        for metric in self.metrics.values():
+            metric(logits, label)
+
+        # calculate loss
+        loss = self.loss(logits, label)
+        output['loss'] = loss
 
         return output
 
